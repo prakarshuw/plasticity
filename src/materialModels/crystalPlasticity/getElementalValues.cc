@@ -76,7 +76,7 @@ void crystalPlasticity<dim>::getElementalValues(FEValues<dim>& fe_values,
 			     }
 				 }
      }
-		 this->postprocessValuesAtCellCenters(cellID,0)=cellOrientationMap[cellID];
+	
      elementalJacobian = K_local;
      elementalResidual = Rlocal;
 
