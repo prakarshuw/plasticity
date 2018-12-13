@@ -14,7 +14,7 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 	unsigned int cellID = 0;
 	FullMatrix<double> rotmat(dim, dim);
 	Vector<double> quat1(4), rod(3), quat2(4), quatprod(4);
-	FullMatrix<double> CE_tau(dim, dim), E_tau(dim, dim), temp, temp2, temp3;
+	
 
 
 	typename DoFHandler<dim>::active_cell_iterator cell = this->dofHandler.begin_active(), endc = this->dofHandler.end();
@@ -44,26 +44,32 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 				}
 					//Update strain, stress, and tangent for current time step/quadrature point
 				calculatePlasticity(cellID, q);
-
+                                 
+				FullMatrix<double> temp,temp3,temp4, C_tau(dim, dim), E_tau(dim, dim), b_tau(dim, dim);
+				Vector<double> temp2;
 				temp.reinit(dim, dim); temp = 0.0;
-				temp2.reinit(dim, dim); temp2 = 0.0;
+				temp2.reinit(dim); temp2 = 0.0;
 				temp3.reinit(dim, dim); temp3 = 0.0;
-				CE_tau = 0.0;
+				temp4.reinit(dim, dim); temp4 = 0.0;
+				C_tau = 0.0;
 				temp = F;
-				F.Tmmult(CE_tau, temp);
-				E_tau = CE_tau;
+				F.Tmmult(C_tau, temp);
+				F.mTmult(b_tau, temp);
+				//E_tau = CE_tau;
 				temp = IdentityMatrix(dim);
 				for (unsigned int i = 0;i<dim;i++) {
+					temp2[i] = 0.5*log(b_tau[i][i])*fe_values.JxW(q);
 					for (unsigned int j = 0;j<dim;j++) {
-						E_tau[i][j] = 0.5*(E_tau[i][j] - temp[i][j]);
-						temp2[i][j] = E_tau[i][j]*fe_values.JxW(q);
-	//		Small strain definition of strain//			temp2[i][j] = (0.5*(F[i][j] + F[j][i]) - temp[i][j])*fe_values.JxW(q);
-	//		Cauchy stress definition//			temp3[i][j] = T[i][j] * fe_values.JxW(q);
-						temp3[i][j] = P[i][j] * fe_values.JxW(q);
+						E_tau[i][j] = 0.5*(C_tau[i][j] - temp[i][j]);						
+						//temp2[i][j] = (0.5*(F[i][j] + F[j][i]) - temp[i][j])*fe_values.JxW(q);
+						//temp2[i][j] = 0.5*log(C_tau[i][j])*fe_values.JxW(q);						
+						temp3[i][j] = T[i][j] * fe_values.JxW(q);
+						temp4[i][j] = E_tau[i][j]*fe_values.JxW(q);
 					}
 				}
 
-				local_strain.add(1.0, temp2);
+				local_Truestrain.add(1.0, temp2);
+				local_strain.add(1.0, temp4);
 				local_stress.add(1.0, temp3);
 				local_microvol = local_microvol + fe_values.JxW(q);
 
@@ -97,8 +103,10 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 				this->postprocessValues(cellID, q, 1, 0) = eqvstrain;
 				if (this->userInputs.enableTwinning)
 					this->postprocessValues(cellID, q, 2, 0) = twin_ouput[cellID][q];
+				
 			}
-
+                        this->postprocessValuesAtCellCenters(cellID,0)=cellOrientationMap[cellID];
+			
 			cellID++;
 		}
 	}
@@ -164,6 +172,7 @@ void crystalPlasticity<dim>::updateAfterIncrement()
   microvol=Utilities::MPI::sum(local_microvol,this->mpi_communicator);
 
   for(unsigned int i=0;i<dim;i++){
+	  global_Truestrain[i] = Utilities::MPI::sum(local_Truestrain[i] / microvol, this->mpi_communicator);
     for(unsigned int j=0;j<dim;j++){
         global_strain[i][j]=Utilities::MPI::sum(local_strain[i][j]/microvol,this->mpi_communicator);
         global_stress[i][j]=Utilities::MPI::sum(local_stress[i][j]/microvol,this->mpi_communicator);
@@ -183,7 +192,7 @@ void crystalPlasticity<dim>::updateAfterIncrement()
   if(this->currentIncrement==0){
     dir += std::string("stressstrain.txt");
     outputFile.open(dir.c_str());
-    outputFile << "Exx"<<'\t'<<"Eyy"<<'\t'<<"Ezz"<<'\t'<<"Eyz"<<'\t'<<"Exz"<<'\t'<<"Exy"<<'\t'<<"Txx"<<'\t'<<"Tyy"<<'\t'<<"Tzz"<<'\t'<<"Tyz"<<'\t'<<"Txz"<<'\t'<<"Txy"<<'\t'<<"TwinRealVF"<<'\t'<<"TwinMade"<<'\t'<<"SlipTotal"<<'\n';
+    outputFile << "TrueExx" << '\t' << "TrueEyy" << '\t' << "TrueEzz" << '\t'<< "Exx"<<'\t'<<"Eyy"<<'\t'<<"Ezz"<<'\t'<<"Eyz"<<'\t'<<"Exz"<<'\t'<<"Exy"<<'\t'<<"Txx"<<'\t'<<"Tyy"<<'\t'<<"Tzz"<<'\t'<<"Tyz"<<'\t'<<"Txz"<<'\t'<<"Txy"<<'\t'<<"TwinRealVF"<<'\t'<<"TwinMade"<<'\t'<<"SlipTotal"<<'\n';
  	  outputFile.close();
   }
   else{
@@ -191,7 +200,7 @@ void crystalPlasticity<dim>::updateAfterIncrement()
   }
   outputFile.open(dir.c_str(),std::fstream::app);
   if(Utilities::MPI::this_mpi_process(this->mpi_communicator)==0){
-    outputFile << global_strain[0][0]<<'\t'<<global_strain[1][1]<<'\t'<<global_strain[2][2]<<'\t'<<global_strain[1][2]<<'\t'<<global_strain[0][2]<<'\t'<<global_strain[0][1]<<'\t'<<global_stress[0][0]<<'\t'<<global_stress[1][1]<<'\t'<<global_stress[2][2]<<'\t'<<global_stress[1][2]<<'\t'<<global_stress[0][2]<<'\t'<<global_stress[0][1]<<'\t'<<F_r<<'\t'<<F_e<<'\t'<<F_s<<'\n';
+    outputFile << global_Truestrain[0] << '\t' << global_Truestrain[1] << '\t' << global_Truestrain[2] << '\t' << global_strain[0][0]<<'\t'<<global_strain[1][1]<<'\t'<<global_strain[2][2]<<'\t'<<global_strain[1][2]<<'\t'<<global_strain[0][2]<<'\t'<<global_strain[0][1]<<'\t'<<global_stress[0][0]<<'\t'<<global_stress[1][1]<<'\t'<<global_stress[2][2]<<'\t'<<global_stress[1][2]<<'\t'<<global_stress[0][2]<<'\t'<<global_stress[0][1]<<'\t'<<F_r<<'\t'<<F_e<<'\t'<<F_s<<'\n';
   }
   outputFile.close();
 
