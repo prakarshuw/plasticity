@@ -119,6 +119,7 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 	local_F_r_Twin = 0.0; //adde by Reza as a modification
 	local_F_r=0.0;
   local_F_s=0.0;
+	local_F_e = 0.0;
 
   char buffer[200];
   //copy rotnew to output
@@ -142,9 +143,8 @@ void crystalPlasticity<dim>::updateAfterIncrement()
           temp.push_back(fe_values.JxW(q));
 					temp.push_back(cellOrientationMap[cellID]);
 
-					twin_ouput[cellID][q]+=twin[cellID][q];
-	        twin[cellID][q] = 0.0;
-
+					twin_ouput[cellID][q]=twin[cellID][q];
+	        
           orientations.addToOutputOrientations(temp);
           for(unsigned int i=0;i<this->userInputs.numTwinSystems;i++){
               local_F_r=local_F_r+twinfraction_conv[cellID][q][i]*fe_values.JxW(q);
@@ -254,16 +254,16 @@ void crystalPlasticity<dim>::updateAfterIncrement()
         double twin_pos, twin_max;
         twin_pos= std::distance(local_twin.begin(), result);
         twin_max=local_twin[twin_pos];
-
+      if (twin[cellID][q] != 1.0) {
         if(F_r_Twin>0){
           if(twin_max > F_T){
 	          FullMatrix<double> FE_t(dim,dim), FP_t(dim,dim),Twin_T(dim,dim),temp(dim,dim);
 	          FE_t=Fe_conv[cellID][q];
 	          FP_t=Fp_conv[cellID][q];
-						for(unsigned int i=0;i<this->userInputs.numTwinSystems;i++){
-                   twinfraction_conv_Twin[cellID][q][i]=0;
+				//		for(unsigned int i=0;i<this->userInputs.numTwinSystems;i++){
+               //    twinfraction_conv_Twin[cellID][q][i]=0;
 //                   s_alpha_conv[cellID][q][numSlipSystems+twin_pos]=s_alpha_twin;
-							}
+		//					}
 
 						rod(0) = rot[cellID][q][0];rod(1) = rot[cellID][q][1];rod(2) = rot[cellID][q][2];
 
@@ -307,11 +307,18 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 
 						//loop over elements
 						twin[cellID][q] = 1.0;
+		  for (unsigned int i = 0;i < this->userInputs.numTwinSystems;i++) {
+				//	twinfraction_conv_Twin[cellID][q][i] = 0;
+				//	s_alpha_conv[cellID][q][this->userInputs.numSlipSystems + i] = s_alpha_conv[cellID][q][this->userInputs.numSlipSystems +twin_pos ] ;
+					
+                                        s_alpha_conv[cellID][q][this->userInputs.numSlipSystems + i] =100000;
+                                          }
 
 
 	        }
         }
       }
+	      }
       cellID++;
     }
   }
@@ -337,6 +344,10 @@ void crystalPlasticity<dim>::updateAfterIncrement()
 		F_T = this->userInputs.twinThresholdFraction;
 	}
 
+	//////Eq. (13) in International Journal of Plasticity 65 (2015) 61–84
+	if (F_T > 1.0) {
+            F_T = 1.0;
+         }
     //call base class project() function to project post processed fields
     ellipticBVP<dim>::projection();
 }
